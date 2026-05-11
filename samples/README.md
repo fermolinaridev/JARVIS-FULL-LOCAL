@@ -33,8 +33,23 @@ Use uma ferramenta tipo Audacity pra:
 Se o XTTS-v2 não encontrar `jarvis_voice.wav`, ele pega o primeiro `.wav`
 em ordem alfabética dentro deste diretório.
 
-Se não houver **nenhum** `.wav`, o `/api/tts` devolve 503 e o frontend cai
-de volta pra Web Speech API (voz do sistema).
+Se não houver **nenhum** `.wav`, o engine cai num **speaker built-in** do
+próprio XTTS-v2 (default `Damien Black` — masculino grave). Você pode
+trocar pra outra voz built-in setando `JARVIS_TTS_SPEAKER` antes de
+iniciar:
+
+```powershell
+$env:JARVIS_TTS_SPEAKER = "Viktor Eka"; python main.py
+```
+
+Vozes masculinas disponíveis: `Damien Black`, `Viktor Eka`, `Royston Min`,
+`Baldur Sanjin`, `Craig Gutsy`, `Andrew Chipper`, `Ludvig Milivoj`,
+`Abrahan Mack`, `Adde Michal`, `Badr Odhiambo`, `Dionisio Schuyler`,
+`Gilberto Mathias`, `Ilkin Urbano`, `Kazuhiko Atallah`, `Suad Qasim`.
+
+Mesmo no modo built-in o frontend recebe áudio do XTTS-v2 (não cai mais
+pra Web Speech). O fallback pra Web Speech só rola se o módulo `tts_engine`
+não conseguir nem carregar (sem torch, sem TTS instalado).
 
 ## Uso legal
 

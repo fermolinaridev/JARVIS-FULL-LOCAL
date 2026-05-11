@@ -97,7 +97,13 @@
       "Read(//tmp/**)",
       "Bash(JARVIS_NO_BROWSER=1 JARVIS_PORT=18422 JARVIS_CLAP=0 \"C:\\\\Users\\\\Pichau\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python314\\\\python.exe\" main.py)",
       "Bash(curl -s --max-time 5 http://127.0.0.1:18422/api/health)",
-      "Bash(curl -s --max-time 5 -X POST -H \"Content-Type: application/json\" -d '{\"text\":\"Bom dia, Senhor.\"}' http://127.0.0.1:18422/api/tts -w \"\\\\nHTTP %{http_code}\\\\n\")"
+      "Bash(curl -s --max-time 5 -X POST -H \"Content-Type: application/json\" -d '{\"text\":\"Bom dia, Senhor.\"}' http://127.0.0.1:18422/api/tts -w \"\\\\nHTTP %{http_code}\\\\n\")",
+      "Bash('C:\\\\Users\\\\Pichau\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python314\\\\python.exe' -c ' *)",
+      "Bash(JARVIS_NO_BROWSER=1 JARVIS_PORT=18423 JARVIS_CLAP=0 \"C:\\\\Users\\\\Pichau\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python314\\\\python.exe\" main.py)",
+      "Bash(curl -s --max-time 5 http://127.0.0.1:18423/api/health)",
+      "Bash(curl -s --max-time 5 http://127.0.0.1:18423/api/tts/status)",
+      "Bash(curl -s --max-time 180 -X POST -H \"Content-Type: application/json\" -d '{\"text\":\"Bom dia, Senhor. Sistemas online.\"}' http://127.0.0.1:18423/api/tts -o /tmp/jarvis_test.wav -w \"HTTP %{http_code} size=%{size_download} time=%{time_total}\\\\n\")",
+      "Bash(curl -s --max-time 30 -X POST -H \"Content-Type: application/json\" -d '{\"text\":\"Estou ao seu dispor, Senhor.\"}' http://127.0.0.1:18423/api/tts -o /tmp/jarvis_test2.wav -w \"HTTP %{http_code} size=%{size_download} time=%{time_total}\\\\n\")"
     ]
   }
 }

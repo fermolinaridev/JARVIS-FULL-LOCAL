@@ -84,6 +84,7 @@ Variáveis de ambiente (todas opcionais):
 | `JARVIS_FULLSCREEN` | `0` | `1` para tela cheia |
 | `JARVIS_CLAP` | `1` | `0` desativa o detector de palmas |
 | `JARVIS_CLAP_THRESHOLD` | `0.35` | Sensibilidade (0.1–0.6, menor = mais sensível) |
+| `JARVIS_TTS_SPEAKER` | `Damien Black` | Speaker built-in do XTTS-v2 quando não há sample (`Viktor Eka`, `Royston Min`, `Damien Black`, etc.) |
 
 ## Estrutura
 

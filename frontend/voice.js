@@ -18,6 +18,10 @@ class Voice {
         this._currentUtt = null;
         this._safetyTimer = null;
 
+        // TTS backend (Coqui XTTS-v2 local)
+        this._currentAudio = null;     // <audio> element atualmente tocando
+        this._backendTTSDisabled = false; // se já falhou uma vez, desliga até próxima sessão
+
         // Callbacks
         this.onTranscript    = null;
         this.onListenStart   = null;
@@ -151,16 +155,88 @@ class Voice {
     }
 
     speak(text) {
-        if (!text || !window.speechSynthesis) {
-            console.warn('[voice] speak ignorado (texto vazio ou sem synth)');
+        if (!text) {
+            console.warn('[voice] speak ignorado (texto vazio)');
             return;
         }
 
         // Limpa estado anterior — força reset, mesmo se algo travou.
         this._forceResetSpeech();
 
-        // Pequeno delay deixa o Chrome resetar a fila depois do cancel().
-        setTimeout(() => this._doSpeak(text), 80);
+        // Tenta o TTS local (XTTS-v2 com voz clonada do JARVIS).
+        // Se não responder ou tiver falhado uma vez, cai pra Web Speech API.
+        if (!this._backendTTSDisabled) {
+            this._doSpeakBackend(text).catch((err) => {
+                console.warn('[voice] backend TTS falhou — fallback Web Speech:', err);
+                this._backendTTSDisabled = true;
+                if (window.speechSynthesis) {
+                    setTimeout(() => this._doSpeak(text), 80);
+                } else {
+                    this._forceResetSpeech();
+                }
+            });
+        } else if (window.speechSynthesis) {
+            setTimeout(() => this._doSpeak(text), 80);
+        }
+    }
+
+    async _doSpeakBackend(text) {
+        // Inicia spinner/estado de fala antes mesmo de receber o áudio,
+        // pra UI reagir (mic-off, orb pulsando).
+        this.speaking = true;
+        if (this.onSpeakStart) this.onSpeakStart();
+        this.suspend();
+
+        const resp = await fetch('/api/tts', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text, language: 'pt' }),
+        });
+
+        if (!resp.ok) {
+            let detail = '';
+            try { detail = (await resp.json()).error || ''; } catch (_) {}
+            this.speaking = false;
+            if (this.onSpeakEnd) this.onSpeakEnd();
+            throw new Error(`HTTP ${resp.status}${detail ? ' — ' + detail : ''}`);
+        }
+
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        this._currentAudio = audio;
+
+        // "Fake audio frames" pra waveform/orb reagirem enquanto toca.
+        this._fakeAudio();
+
+        return new Promise((resolve, reject) => {
+            let finished = false;
+            const finish = (reason) => {
+                if (finished) return;
+                finished = true;
+                console.log('[voice] backend TTS finish:', reason);
+                this.speaking = false;
+                this._stopFakeAudio();
+                this._currentAudio = null;
+                try { URL.revokeObjectURL(url); } catch (_) {}
+                if (this.onSpeakEnd) this.onSpeakEnd();
+                this.resume();
+                resolve();
+            };
+
+            audio.onended = () => finish('ended');
+            audio.onerror = (e) => {
+                console.warn('[voice] audio error:', e);
+                finish('error');
+                reject(new Error('audio playback error'));
+            };
+
+            audio.play().catch((err) => {
+                console.warn('[voice] audio.play() rejeitou:', err);
+                finish('play-reject');
+                reject(err);
+            });
+        });
     }
 
     _doSpeak(text) {
@@ -231,6 +307,11 @@ class Voice {
     _forceResetSpeech() {
         if (window.speechSynthesis) {
             try { speechSynthesis.cancel(); } catch (_) {}
+        }
+        if (this._currentAudio) {
+            try { this._currentAudio.pause(); } catch (_) {}
+            try { this._currentAudio.src = ''; } catch (_) {}
+            this._currentAudio = null;
         }
         this.speaking = false;
         this._stopFakeAudio();

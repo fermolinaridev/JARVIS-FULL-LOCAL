@@ -2,13 +2,14 @@
 
 Assistente pessoal estilo **J.A.R.V.I.S.** rodando 100% localmente — Python + [Ollama](https://ollama.com), com:
 
-- **Janela desktop** (pywebview + WebView2) com **orb 3D** estilo arco-reator (Three.js, GPU-accelerated)
-- **Voz**: fala com você (TTS) e ouve você (STT via Web Speech API)
+- **HUD estilo Iron Man** (CSS puro): arco-reator central com anéis concêntricos, painéis laterais com stats ao vivo (CPU/RAM/disco/rede/temperatura/processos), radar, log de eventos
+- **Voz JARVIS clonada localmente** via **Coqui XTTS-v2** — fala em PT-BR com timbre clonado do Paul Bettany (com fallback pra Web Speech API se a TTS local não estiver disponível)
+- **STT**: ouve você via Web Speech API com auto-restart
 - **Detecção de palmas**: 2 palmas em sequência → JARVIS te cumprimenta com base no horário
 - **Tool calling nativo do Ollama** — JARVIS decide sozinho quando usar cada ferramenta
 - **Controle de aplicativos**: abrir/fechar/focar janelas, digitar texto, atalhos de teclado, clipboard, screenshot
 - **Memória persistente** + **agenda** (notas e compromissos)
-- **GPU**: o Ollama detecta sua placa NVIDIA automaticamente; o orb usa WebGL
+- **GPU**: o Ollama detecta sua placa NVIDIA automaticamente; o XTTS-v2 usa CUDA pra inferência ~realtime
 
 ## Pré-requisitos
 
@@ -27,10 +28,18 @@ ollama pull qwen3.5:4b
 # 2. Iniciar o servidor Ollama (em outro terminal, se necessário)
 ollama serve
 
-# 3. Instalar dependências Python
+# 3. Instalar dependências Python (base)
 pip install -r requirements.txt
 
-# 4. Rodar JARVIS
+# 4. (opcional) Voz local do JARVIS estilo filme — instale PyTorch+CUDA e Coqui:
+pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu128
+pip install coqui-tts
+
+# 5. (opcional) Coloque uma amostra .wav de voz em samples/jarvis_voice.wav
+#    Veja samples/README.md pra detalhes (Paul Bettany, ~10s, mono 22050 Hz).
+#    Se faltar, o frontend cai pra Web Speech API automaticamente.
+
+# 6. Rodar JARVIS
 python main.py
 ```
 

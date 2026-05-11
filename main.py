@@ -42,6 +42,12 @@ from memory import Memory
 from notes import NotesStore
 from tools import get_system_status, list_processes
 
+try:
+    import tts_engine  # carrega lazy quando /api/tts é chamado
+except Exception as _tts_imp_err:  # noqa: BLE001
+    tts_engine = None  # type: ignore[assignment]
+    print(f"[JARVIS] TTS local indisponível ({_tts_imp_err}); usando Web Speech.")
+
 MEMORY = Memory()
 NOTES = NotesStore()
 BRAIN = Brain(MEMORY)
@@ -260,6 +266,12 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/api/stats":
             self._send_json(200, _collect_stats())
             return
+        if url.path == "/api/tts/status":
+            self._send_json(
+                200,
+                tts_engine.ENGINE.status if tts_engine else {"loaded": False, "error": "module not imported"},
+            )
+            return
         # Estáticos
         rel = url.path if url.path != "/" else "/index.html"
         self._serve_static(rel)
@@ -291,6 +303,31 @@ class Handler(BaseHTTPRequestHandler):
             msg = _greeting()
             BUS.publish({"type": "wake", "message": msg})
             self._send_json(200, {"ok": True, "message": msg})
+            return
+
+        if url.path == "/api/tts":
+            if tts_engine is None:
+                self._send_json(503, {"ok": False, "error": "TTS local indisponível"})
+                return
+            tts_text = (payload.get("text") or "").strip()
+            language = (payload.get("language") or "pt").strip() or "pt"
+            if not tts_text:
+                self._send_json(400, {"ok": False, "error": "texto vazio"})
+                return
+            try:
+                wav = tts_engine.synthesize(tts_text, language=language)
+            except Exception as e:  # noqa: BLE001
+                self._send_json(503, {"ok": False, "error": str(e)})
+                return
+            try:
+                self.send_response(200)
+                self.send_header("Content-Type", "audio/wav")
+                self.send_header("Content-Length", str(len(wav)))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(wav)
+            except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
+                pass
             return
 
         self._send_text(404, "not found")

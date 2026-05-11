@@ -6,3 +6,10 @@ numpy>=1.26.0
 pyautogui>=0.9.54
 PyGetWindow>=0.0.9
 pyperclip>=1.8.2
+
+# --- Voz local (opcional) — Coqui XTTS-v2 com clonagem -------------------
+# Instale separado se quiser a voz do JARVIS estilo filme:
+#   pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu128
+#   pip install "coqui-tts[codec]"
+#   pip install "transformers<5"
+# Sem isso, o frontend usa Web Speech API automaticamente (fallback).

@@ -1,0 +1,8 @@
+# Não comita amostras de áudio (potencialmente grandes / com direitos)
+*.wav
+*.mp3
+*.flac
+*.ogg
+*.m4a
+!.gitignore
+!README.md

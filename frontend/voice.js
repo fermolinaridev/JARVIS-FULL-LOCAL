@@ -187,23 +187,50 @@ class Voice {
         if (this.onSpeakStart) this.onSpeakStart();
         this.suspend();
 
-        const resp = await fetch('/api/tts', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text, language: 'pt' }),
-        });
+        // Timeout generoso pra primeira request (modelo carrega ~30s),
+        // mas não infinito — se o servidor travar, cai pra Web Speech.
+        const ctrl = new AbortController();
+        const timeoutMs = 60000;
+        const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+
+        let resp;
+        try {
+            resp = await fetch('/api/tts', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text, language: 'pt' }),
+                signal: ctrl.signal,
+            });
+        } catch (err) {
+            clearTimeout(timer);
+            this.speaking = false;
+            if (this.onSpeakEnd) this.onSpeakEnd();
+            this.resume();
+            throw new Error('fetch falhou: ' + (err && err.message || err));
+        }
+        clearTimeout(timer);
 
         if (!resp.ok) {
             let detail = '';
             try { detail = (await resp.json()).error || ''; } catch (_) {}
             this.speaking = false;
             if (this.onSpeakEnd) this.onSpeakEnd();
+            this.resume();
             throw new Error(`HTTP ${resp.status}${detail ? ' — ' + detail : ''}`);
         }
 
         const blob = await resp.blob();
+        if (!blob || blob.size < 100) {
+            this.speaking = false;
+            if (this.onSpeakEnd) this.onSpeakEnd();
+            this.resume();
+            throw new Error('WAV vazio (' + (blob && blob.size) + ' bytes)');
+        }
+        console.log('[voice] backend TTS recebido:', (blob.size / 1024).toFixed(1), 'KB');
+
         const url = URL.createObjectURL(blob);
         const audio = new Audio(url);
+        audio.preload = 'auto';
         this._currentAudio = audio;
 
         // "Fake audio frames" pra waveform/orb reagirem enquanto toca.
@@ -226,16 +253,23 @@ class Voice {
 
             audio.onended = () => finish('ended');
             audio.onerror = (e) => {
-                console.warn('[voice] audio error:', e);
+                const code = audio.error && audio.error.code;
+                console.warn('[voice] audio error code=', code, e);
                 finish('error');
-                reject(new Error('audio playback error'));
+                reject(new Error('audio playback error code=' + code));
             };
 
-            audio.play().catch((err) => {
-                console.warn('[voice] audio.play() rejeitou:', err);
-                finish('play-reject');
-                reject(err);
-            });
+            const playPromise = audio.play();
+            if (playPromise && typeof playPromise.then === 'function') {
+                playPromise.then(
+                    () => console.log('[voice] audio.play() OK, duration:', audio.duration),
+                    (err) => {
+                        console.warn('[voice] audio.play() rejeitou:', err && err.name, err && err.message);
+                        finish('play-reject');
+                        reject(err);
+                    },
+                );
+            }
         });
     }
 

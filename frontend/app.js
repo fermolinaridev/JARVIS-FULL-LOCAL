@@ -542,6 +542,15 @@ function activate() {
   activated = true;
   activationOverlay.classList.add('gone');
 
+  // "Destrava" o áudio HTML5 dentro do gesto do usuário. Sem isso, o
+  // <audio> do TTS local pode falhar com NotAllowedError em Edge --app.
+  try {
+    const silentWav = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=';
+    const unlock = new Audio(silentWav);
+    unlock.volume = 0;
+    unlock.play().catch(() => {});
+  } catch (_) {}
+
   if (window.speechSynthesis) {
     try {
       const warm = new SpeechSynthesisUtterance(' ');

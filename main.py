@@ -442,6 +442,24 @@ def _open_in_app_window(url: str) -> bool:
     return False
 
 
+def _prewarm_tts() -> None:
+    """Aquece o XTTS-v2 em background — modelo carrega na 1ª request sem isso.
+
+    Sem prewarm, a primeira síntese trava o frontend por ~30s (carregando
+    1.8 GB de pesos) e o usuário acha que JARVIS ficou mudo.
+    """
+    if tts_engine is None:
+        return
+    try:
+        t0 = time.time()
+        print(f"[{ASSISTANT_NAME}] aquecendo XTTS-v2 em background ...")
+        tts_engine.ENGINE._ensure_loaded()  # type: ignore[attr-defined]
+        print(f"[{ASSISTANT_NAME}] XTTS-v2 pronto em {time.time() - t0:.1f}s "
+              f"(device={tts_engine.ENGINE._device}, speaker={tts_engine.ENGINE._speaker}).")
+    except Exception as e:  # noqa: BLE001
+        print(f"[{ASSISTANT_NAME}] prewarm TTS falhou: {e}")
+
+
 def main() -> int:
     # Garante que o Ollama está no ar antes de qualquer coisa
     _ensure_ollama_running()
@@ -452,6 +470,10 @@ def main() -> int:
 
     server_thread = threading.Thread(target=server.serve_forever, daemon=True, name="HttpServer")
     server_thread.start()
+
+    # Aquece o TTS em paralelo — não bloqueia o boot do servidor.
+    if os.environ.get("JARVIS_TTS_PREWARM", "1") != "0":
+        threading.Thread(target=_prewarm_tts, daemon=True, name="TTSPrewarm").start()
 
     url = f"http://127.0.0.1:{port}/"
     print(f"[{ASSISTANT_NAME}] servidor iniciado em {url}")

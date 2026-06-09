@@ -3,7 +3,7 @@
 Inclui um *intent matcher* determinístico — comandos comuns de voz
 (volume, mídia, abrir apps/youtube/spotify) são detectados por regex e executados
 sem passar pelo LLM. Isso garante latência baixa e 0% de "alucinação de ação"
-em modelos pequenos como qwen3.5:4b.
+em modelos pequenos como qwen3:8b.
 """
 from __future__ import annotations
 

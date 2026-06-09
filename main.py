@@ -406,7 +406,11 @@ def _free_port() -> int:
 
 
 def _open_in_app_window(url: str) -> bool:
-    """Tenta abrir no Edge/Chrome em modo --app (sem chrome do navegador)."""
+    """Tenta abrir no Edge/Chrome em modo --app (sem chrome do navegador).
+
+    No macOS prefere Safari: usa STT local da Apple (Opera/Firefox não suportam
+    SpeechRecognition; Chrome/Edge dependem do serviço cloud do Google).
+    """
     candidates: list[list[str]] = []
 
     if sys.platform == "win32":
@@ -426,7 +430,20 @@ def _open_in_app_window(url: str) -> bool:
             if os.path.isfile(p):
                 candidates.append([p, f"--app={url}", f"--window-size={WINDOW_WIDTH},{WINDOW_HEIGHT}"])
                 break
-    # Fallback genérico
+
+    elif sys.platform == "darwin":
+        # Override explícito tem prioridade
+        preferred = os.environ.get("JARVIS_BROWSER", "").strip()
+        order = [preferred] if preferred else ["Safari", "Google Chrome", "Microsoft Edge", "Brave Browser", "Chromium"]
+        for app_name in order:
+            if not app_name:
+                continue
+            app_path = f"/Applications/{app_name}.app"
+            if os.path.isdir(app_path):
+                candidates.append(["open", "-a", app_name, url])
+                break
+
+    # Fallback genérico (Linux ou tudo falhou)
     for browser in ("msedge", "chrome", "google-chrome", "chromium"):
         which = shutil.which(browser)
         if which:

@@ -9,21 +9,21 @@ Assistente pessoal estilo **J.A.R.V.I.S.** rodando 100% localmente — Python + 
 - **Tool calling nativo do Ollama** — JARVIS decide sozinho quando usar cada ferramenta
 - **Controle de aplicativos**: abrir/fechar/focar janelas, digitar texto, atalhos de teclado, clipboard, screenshot
 - **Memória persistente** + **agenda** (notas e compromissos)
-- **GPU**: o Ollama detecta sua placa NVIDIA automaticamente; o XTTS-v2 usa CUDA pra inferência ~realtime
+- **GPU**: o Ollama detecta sua placa NVIDIA automaticamente (no macOS Apple Silicon usa Metal nativo); o XTTS-v2 usa CUDA/MPS pra inferência ~realtime
 
 ## Pré-requisitos
 
 - Windows 10/11 com WebView2 (já vem no Win11)
 - Python 3.10+
 - [Ollama](https://ollama.com/download) instalado e rodando
-- Modelo com tool-calling (default: `qwen3.5:4b`)
+- Modelo com tool-calling (default: `qwen3:8b`)
 - Microfone (opcional, para voz e palmas)
 
 ## Instalação
 
 ```bash
 # 1. Baixar um modelo com suporte a tool-calling
-ollama pull qwen3.5:4b
+ollama pull qwen3:8b
 
 # 2. Iniciar o servidor Ollama (em outro terminal, se necessário)
 ollama serve
@@ -76,7 +76,7 @@ Variáveis de ambiente (todas opcionais):
 
 | Variável | Padrão | Descrição |
 |---|---|---|
-| `JARVIS_MODEL` | `qwen3.5:4b` | Modelo Ollama |
+| `JARVIS_MODEL` | `qwen3:8b` | Modelo Ollama |
 | `OLLAMA_HOST` | `http://localhost:11434` | Endereço do Ollama |
 | `JARVIS_USER_TITLE` | `Senhor` | Como JARVIS te chama |
 | `JARVIS_NUM_CTX` | `2048` | Janela de contexto (tokens) |

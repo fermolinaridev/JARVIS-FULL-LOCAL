@@ -11,7 +11,7 @@ NOTES_FILE = ROOT / "notes.json"
 LOG_FILE = ROOT / "jarvis.log"
 
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
-MODEL_NAME = os.environ.get("JARVIS_MODEL", "qwen3.5:4b")
+MODEL_NAME = os.environ.get("JARVIS_MODEL", "qwen3:8b")
 
 USER_TITLE = os.environ.get("JARVIS_USER_TITLE", "Senhor")
 ASSISTANT_NAME = "JARVIS"

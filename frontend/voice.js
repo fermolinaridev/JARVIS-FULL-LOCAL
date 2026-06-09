@@ -22,6 +22,14 @@ class Voice {
         this._currentAudio = null;     // <audio> element atualmente tocando
         this._backendTTSDisabled = false; // se já falhou uma vez, desliga até próxima sessão
 
+        // Botão TTS (Ctrl+T) — quando true, JARVIS não fala, só mostra no chat.
+        // Persiste em localStorage.
+        try {
+            this.muted = localStorage.getItem('jarvis.tts.muted') === '1';
+        } catch (_) {
+            this.muted = false;
+        }
+
         // Callbacks
         this.onTranscript    = null;
         this.onListenStart   = null;
@@ -34,6 +42,18 @@ class Voice {
         this._initRecognition();
         this._initSynthesis();
     }
+
+    setMuted(muted) {
+        this.muted = !!muted;
+        try { localStorage.setItem('jarvis.tts.muted', this.muted ? '1' : '0'); } catch (_) {}
+        if (this.muted) {
+            // Corta qualquer fala em andamento
+            this.cancel();
+        }
+        if (this.onMutedChange) this.onMutedChange(this.muted);
+    }
+
+    toggleMuted() { this.setMuted(!this.muted); }
 
     _initRecognition() {
         const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -157,6 +177,14 @@ class Voice {
     speak(text) {
         if (!text) {
             console.warn('[voice] speak ignorado (texto vazio)');
+            return;
+        }
+
+        // TTS mudo via botão — emite start/end pro orb não travar em "speaking".
+        if (this.muted) {
+            console.log('[voice] muted — pulando síntese');
+            if (this.onSpeakStart) this.onSpeakStart();
+            setTimeout(() => { if (this.onSpeakEnd) this.onSpeakEnd(); }, 30);
             return;
         }
 

@@ -13,6 +13,7 @@ const stateLabel       = $('state-label');
 const micDot           = $('mic-dot');
 const micLabel         = $('mic-label');
 const micToggleBtn     = $('mic-toggle');
+const ttsToggleBtn     = $('tts-toggle');
 const chatToggleBtn    = $('chat-toggle');
 const chatPanel        = $('chat-panel');
 const chatCloseBtn     = $('chat-close');
@@ -581,10 +582,29 @@ function toggleMic() {
 micBtn.addEventListener('click', toggleMic);
 micToggleBtn.addEventListener('click', toggleMic);
 
+function toggleTTS() {
+  if (!window.voice) return;
+  window.voice.toggleMuted();
+}
+function syncTTSButton(muted) {
+  if (!ttsToggleBtn) return;
+  ttsToggleBtn.classList.toggle('active', !muted);
+  ttsToggleBtn.textContent = muted ? 'TTS OFF' : 'TTS';
+  ttsToggleBtn.title = muted
+    ? 'JARVIS está mudo — clique para ele falar (Ctrl+T)'
+    : 'JARVIS está falando — clique para silenciar (Ctrl+T)';
+}
+ttsToggleBtn.addEventListener('click', toggleTTS);
+
 window.addEventListener('keydown', (e) => {
   if (e.ctrlKey && (e.key === 'm' || e.key === 'M')) {
     e.preventDefault();
     toggleMic();
+    return;
+  }
+  if (e.ctrlKey && (e.key === 't' || e.key === 'T')) {
+    e.preventDefault();
+    toggleTTS();
     return;
   }
   if (e.ctrlKey && (e.key === 'l' || e.key === 'L')) {
@@ -625,6 +645,8 @@ if (window.voice) {
     if (window.voice.suspended) return;
     send(text);
   };
+  window.voice.onMutedChange = (muted) => syncTTSButton(muted);
+  syncTTSButton(window.voice.muted);
   window.voice.onSpeakStart = () => setState('speaking', 'falando');
   window.voice.onSpeakEnd   = () => {
     if (!busy) {

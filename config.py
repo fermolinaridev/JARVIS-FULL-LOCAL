@@ -16,7 +16,10 @@ MODEL_NAME = os.environ.get("JARVIS_MODEL", "qwen3:8b")
 USER_TITLE = os.environ.get("JARVIS_USER_TITLE", "Senhor")
 ASSISTANT_NAME = "JARVIS"
 
-NUM_CTX = int(os.environ.get("JARVIS_NUM_CTX", "2048"))
+# System prompt + 38 tool schemas já dão ~2.900 tokens. Com 2048 o Ollama corta
+# o começo do prompt (personalidade + maioria das tools) e o JARVIS diz que "não
+# tem acesso" a hora/status. 8192 cabe 100% na GPU de 8 GB junto com o XTTS-v2.
+NUM_CTX = int(os.environ.get("JARVIS_NUM_CTX", "8192"))
 MAX_HISTORY = 40
 MAX_TOOL_ITERATIONS = 6
 

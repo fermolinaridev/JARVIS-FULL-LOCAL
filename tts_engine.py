@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import tempfile
 import threading
 import time
@@ -51,6 +52,16 @@ MALE_SPEAKERS = (
     "Adde Michal", "Badr Odhiambo", "Dionisio Schuyler", "Gilberto Mathias",
     "Ilkin Urbano", "Kazuhiko Atallah", "Suad Qasim",
 )
+
+
+def _clean_for_tts(text: str) -> str:
+    """
+    O XTTS-v2 em PT costuma LER o ponto final em voz alta ("graus ponto").
+    Troca ponto de fim de frase por vírgula e tira o do final (testado:
+    "ponto" falado em 4/9 falas -> 0/9). Não mexe em decimais ("3.5"),
+    só em pontos seguidos de espaço ou fim do texto.
+    """
+    return re.sub(r"\.+(\s+|$)", lambda m: "," + m.group(1) if m.group(1) else "", text).strip()
 
 
 def _resolve_sample() -> Optional[Path]:
@@ -186,6 +197,7 @@ class TTSEngine:
         # 800 (~30s) pra evitar latência absurda numa única request.
         if len(text) > 800:
             text = text[:797] + "..."
+        text = _clean_for_tts(text)
 
         sample = _resolve_sample()
         # Não tem nem sample nem speaker built-in => sem o que cantar.

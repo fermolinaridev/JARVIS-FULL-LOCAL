@@ -79,7 +79,7 @@ Variáveis de ambiente (todas opcionais):
 | `JARVIS_MODEL` | `qwen3:8b` | Modelo Ollama |
 | `OLLAMA_HOST` | `http://localhost:11434` | Endereço do Ollama |
 | `JARVIS_USER_TITLE` | `Senhor` | Como JARVIS te chama |
-| `JARVIS_NUM_CTX` | `2048` | Janela de contexto (tokens) |
+| `JARVIS_NUM_CTX` | `8192` | Janela de contexto (tokens) |
 | `JARVIS_WIDTH` / `JARVIS_HEIGHT` | `1100` / `780` | Tamanho da janela |
 | `JARVIS_FULLSCREEN` | `0` | `1` para tela cheia |
 | `JARVIS_CLAP` | `1` | `0` desativa o detector de palmas |

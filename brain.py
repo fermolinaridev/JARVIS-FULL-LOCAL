@@ -15,7 +15,7 @@ from typing import Any, Iterator
 import ollama
 import requests
 
-from config import MAX_TOOL_ITERATIONS, MODEL_NAME, NUM_CTX, OLLAMA_HOST, SYSTEM_PROMPT, USER_TITLE
+from config import KEEP_ALIVE, MAX_TOOL_ITERATIONS, MODEL_NAME, NUM_CTX, OLLAMA_HOST, SYSTEM_PROMPT, THINK, USER_TITLE
 from memory import Memory
 from tools import TOOL_SCHEMAS, call_tool
 
@@ -73,6 +73,10 @@ class Brain:
                     "top_p": 0.9,
                 },
                 stream=True,
+                # Sem "thinking": o raciocínio oculto do qwen3 custava ~30 s
+                # antes da primeira palavra (JARVIS_THINK=1 religa).
+                think=THINK,
+                keep_alive=KEEP_ALIVE,
             )
         except Exception as e:
             raise RuntimeError(f"falha ao consultar Ollama: {e}") from e

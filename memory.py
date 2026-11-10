@@ -8,6 +8,10 @@ from typing import Any
 from config import MAX_HISTORY, MEMORY_FILE
 
 
+_WEEKDAYS = ("segunda-feira", "terça-feira", "quarta-feira", "quinta-feira",
+             "sexta-feira", "sábado", "domingo")
+
+
 class Memory:
     """Gerencia histórico da conversa e fatos persistentes."""
 
@@ -39,16 +43,23 @@ class Memory:
                 msg[key] = extra[key]
         self.history.append(msg)
         if len(self.history) > self.max_history:
-            self.history = self.history[-self.max_history:]
+            # Corta em bloco (pra metade), não 1 a 1: se o começo do histórico
+            # muda a cada turno, o Ollama perde o cache do prompt e reprocessa
+            # tudo (~1 s por pergunta). Recomeça sempre numa mensagem do usuário.
+            self.history = self.history[-(self.max_history // 2):]
+            while self.history and self.history[0].get("role") != "user":
+                self.history.pop(0)
 
     def messages_for_model(self, system_prompt: str) -> list[dict[str, Any]]:
         messages: list[dict[str, Any]] = [{"role": "system", "content": system_prompt}]
+        # Data de hoje (só o dia: muda 1x por dia e não derruba o cache do prompt).
+        # Sem isso o modelo chuta o ano ao agendar "amanhã às três".
+        now = datetime.now()
+        context = f"Hoje é {_WEEKDAYS[now.weekday()]}, {now:%d/%m/%Y} (formato ISO: {now:%Y-%m-%d})."
         if self.facts:
             summary = "\n".join(f"- {k}: {v['value']}" for k, v in self.facts.items())
-            messages.append({
-                "role": "system",
-                "content": f"Fatos lembrados sobre o usuário:\n{summary}",
-            })
+            context += f"\n\nFatos lembrados sobre o usuário:\n{summary}"
+        messages.append({"role": "system", "content": context})
         for msg in self.history:
             messages.append({k: v for k, v in msg.items() if k in self._ALLOWED_KEYS})
         return messages

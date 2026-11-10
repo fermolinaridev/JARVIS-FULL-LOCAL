@@ -16,14 +16,14 @@ Assistente pessoal estilo **J.A.R.V.I.S.** rodando 100% localmente — Python + 
 - Windows 10/11 com WebView2 (já vem no Win11)
 - Python 3.10+
 - [Ollama](https://ollama.com/download) instalado e rodando
-- Modelo com tool-calling (default: `qwen3:8b`)
+- Modelo com tool-calling (default: `qwen3:4b-instruct-2507-q4_K_M` — cabe na GPU de 8 GB junto com a voz)
 - Microfone (opcional, para voz e palmas)
 
 ## Instalação
 
 ```bash
 # 1. Baixar um modelo com suporte a tool-calling
-ollama pull qwen3:8b
+ollama pull qwen3:4b-instruct-2507-q4_K_M
 
 # 2. Iniciar o servidor Ollama (em outro terminal, se necessário)
 ollama serve
@@ -76,10 +76,12 @@ Variáveis de ambiente (todas opcionais):
 
 | Variável | Padrão | Descrição |
 |---|---|---|
-| `JARVIS_MODEL` | `qwen3:8b` | Modelo Ollama |
-| `OLLAMA_HOST` | `http://localhost:11434` | Endereço do Ollama |
+| `JARVIS_MODEL` | `qwen3:4b-instruct-2507-q4_K_M` | Modelo Ollama (`qwen3:8b` é mais esperto, mas não cabe na VRAM de 8 GB junto com o XTTS e fica ~10x mais lento) |
+| `JARVIS_THINK` | `0` | `1` liga o raciocínio oculto do qwen3 (bem mais lento) |
+| `JARVIS_KEEP_ALIVE` | `60m` | Tempo que o modelo fica carregado na VRAM |
+| `OLLAMA_HOST` | `http://127.0.0.1:11434` | Endereço do Ollama (evite `localhost`: no Windows custa ~2 s por chamada) |
 | `JARVIS_USER_TITLE` | `Senhor` | Como JARVIS te chama |
-| `JARVIS_NUM_CTX` | `8192` | Janela de contexto (tokens) |
+| `JARVIS_NUM_CTX` | `6144` | Janela de contexto (tokens). Mínimo útil ~4096: o prompt + tools ocupam ~2.900 |
 | `JARVIS_WIDTH` / `JARVIS_HEIGHT` | `1100` / `780` | Tamanho da janela |
 | `JARVIS_FULLSCREEN` | `0` | `1` para tela cheia |
 | `JARVIS_CLAP` | `1` | `0` desativa o detector de palmas |

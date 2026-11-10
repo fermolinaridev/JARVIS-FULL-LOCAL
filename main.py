@@ -34,12 +34,14 @@ from config import (
     FRONTEND_DIR,
     MODEL_NAME,
     OLLAMA_HOST,
+    SYSTEM_PROMPT,
     USER_TITLE,
     WINDOW_HEIGHT,
     WINDOW_WIDTH,
 )
 from memory import Memory
 from notes import NotesStore
+import tools
 from tools import get_system_status, list_processes
 
 try:
@@ -50,6 +52,7 @@ except Exception as _tts_imp_err:  # noqa: BLE001
 
 MEMORY = Memory()
 NOTES = NotesStore()
+tools.bind(MEMORY, NOTES)
 BRAIN = Brain(MEMORY)
 
 
@@ -99,6 +102,34 @@ BUS = EventBus()
 
 _LAST_NET = {"t": 0.0, "rx": 0, "tx": 0}
 
+# Lista de processos do HUD. psutil.process_iter() leva ~0,8 s de Python puro
+# (segurando o GIL); o frontend consulta /api/stats a cada 2,5 s, e isso deixava
+# a síntese de voz ~75% mais lenta. Então: cache de 15 s, e nunca atualiza
+# enquanto o JARVIS está pensando ou falando.
+_PROC_CACHE: dict[str, Any] = {"t": 0.0, "procs": []}
+_PROC_REFRESH_S = 15.0
+_TURNS_RUNNING = 0
+
+
+def _busy() -> bool:
+    if _TURNS_RUNNING > 0:
+        return True
+    try:
+        return tts_engine is not None and tts_engine.ENGINE._lock.locked()  # type: ignore[attr-defined]
+    except Exception:
+        return False
+
+
+def _top_processes() -> list[dict[str, Any]]:
+    now = time.time()
+    if now - _PROC_CACHE["t"] >= _PROC_REFRESH_S and not _busy():
+        _PROC_CACHE["t"] = now
+        try:
+            _PROC_CACHE["procs"] = list_processes(top_n=6)
+        except Exception:
+            pass
+    return _PROC_CACHE["procs"]
+
 
 def _collect_stats() -> dict[str, Any]:
     """Snapshot ao vivo de CPU/RAM/disco/processos pra alimentar o HUD."""
@@ -137,10 +168,7 @@ def _collect_stats() -> dict[str, Any]:
         pass
 
     # top processos
-    try:
-        procs = list_processes(top_n=6)
-    except Exception:
-        procs = []
+    procs = _top_processes()
 
     return {
         "system": sysinfo,
@@ -162,11 +190,15 @@ def _collect_stats() -> dict[str, Any]:
 
 def process_turn(text: str) -> None:
     """Roda em background; despeja eventos no bus."""
+    global _TURNS_RUNNING
+    _TURNS_RUNNING += 1
     try:
         for ev in BRAIN.think(text):
             BUS.publish(ev)
     except Exception as e:
         BUS.publish({"type": "error", "message": f"falha: {e}"})
+    finally:
+        _TURNS_RUNNING -= 1
 
 
 # --- Handler HTTP --------------------------------------------------------
@@ -470,11 +502,24 @@ def _prewarm_tts() -> None:
     try:
         t0 = time.time()
         print(f"[{ASSISTANT_NAME}] aquecendo XTTS-v2 em background ...")
-        tts_engine.ENGINE._ensure_loaded()  # type: ignore[attr-defined]
+        tts_engine.ENGINE.warmup()
         print(f"[{ASSISTANT_NAME}] XTTS-v2 pronto em {time.time() - t0:.1f}s "
               f"(device={tts_engine.ENGINE._device}, speaker={tts_engine.ENGINE._speaker}).")
     except Exception as e:  # noqa: BLE001
         print(f"[{ASSISTANT_NAME}] prewarm TTS falhou: {e}")
+
+
+def _prewarm_llm() -> None:
+    """Carrega o modelo do Ollama na VRAM já na abertura e deixa o prompt de
+    sistema + tools em cache — sem isso a primeira pergunta espera ~8 s."""
+    try:
+        t0 = time.time()
+        warm = MEMORY.messages_for_model(SYSTEM_PROMPT) + [{"role": "user", "content": "ok"}]
+        for _ in BRAIN._stream_chat(warm):  # mesmas opções das perguntas reais
+            pass
+        print(f"[{ASSISTANT_NAME}] modelo {BRAIN.model} carregado em {time.time() - t0:.1f}s.")
+    except Exception as e:  # noqa: BLE001
+        print(f"[{ASSISTANT_NAME}] prewarm do LLM falhou: {e}")
 
 
 def main() -> int:
@@ -491,6 +536,7 @@ def main() -> int:
     # Aquece o TTS em paralelo — não bloqueia o boot do servidor.
     if os.environ.get("JARVIS_TTS_PREWARM", "1") != "0":
         threading.Thread(target=_prewarm_tts, daemon=True, name="TTSPrewarm").start()
+    threading.Thread(target=_prewarm_llm, daemon=True, name="LLMPrewarm").start()
 
     url = f"http://127.0.0.1:{port}/"
     print(f"[{ASSISTANT_NAME}] servidor iniciado em {url}")

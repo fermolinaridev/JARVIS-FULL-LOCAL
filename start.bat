@@ -11,6 +11,6 @@ if exist ".venv\Scripts\python.exe" set "PY=.venv\Scripts\python.exe"
 if exist "venv\Scripts\python.exe" set "PY=venv\Scripts\python.exe"
 
 REM Roda minimizado, redirecionando logs
-start "JARVIS" /MIN cmd /c "%PY% main.py >> jarvis.log 2>&1"
+start "JARVIS" /MIN cmd /c "%PY% -u main.py >> jarvis.log 2>&1"
 
 exit /b 0

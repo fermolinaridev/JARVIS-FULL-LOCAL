@@ -293,6 +293,50 @@ function appendJarvisToken(text) {
   currentJarvisMsg.textContent += text;
   currentJarvisFullText += text;
   log.scrollTop = log.scrollHeight;
+  ttsFeed(text);
+}
+
+// ───── fala frase a frase ─────
+// Cada frase completa vai pro TTS assim que o LLM termina de escrevê-la, em
+// vez de esperar a resposta inteira. A 1ª frase pode ser curtinha ("Claro,
+// Senhor.") pra voz sair logo; as seguintes são agrupadas até ~40 chars.
+let ttsBuf = '';
+let ttsSent = false;
+
+function ttsFeed(text) {
+  if (!window.voice) return;
+  ttsBuf += text;
+  const re = /[.!?…]+["')\]]*\s+|\n+/g;
+  let m, cut = 0;
+  while ((m = re.exec(ttsBuf)) !== null) {
+    const end = m.index + m[0].length;
+    if (end - cut >= (ttsSent ? 40 : 12)) {
+      window.voice.streamPush(ttsBuf.slice(cut, end));
+      ttsSent = true;
+      cut = end;
+    }
+  }
+  if (cut) ttsBuf = ttsBuf.slice(cut);
+  // Frase comprida sem ponto (ex.: lista de janelas): corta na última vírgula
+  // pra não segurar a voz até o fim dela.
+  // (a 1ª fala corta mais cedo, em 70 chars, pra voz sair logo)
+  if (ttsBuf.length > (ttsSent ? 160 : 70)) {
+    const i = Math.max(ttsBuf.lastIndexOf(', '), ttsBuf.lastIndexOf('; '), ttsBuf.lastIndexOf(': '));
+    if (i >= 25) {
+      window.voice.streamPush(ttsBuf.slice(0, i + 1));
+      ttsSent = true;
+      ttsBuf = ttsBuf.slice(i + 2);
+    }
+  }
+}
+
+function ttsFlush(fullText) {
+  // Nenhum token chegou (só o full_text)? Fala ele inteiro.
+  const rest = (!ttsSent && !ttsBuf.trim()) ? (fullText || '') : ttsBuf;
+  ttsBuf = '';
+  ttsSent = false;
+  window.voice.streamPush(rest);
+  window.voice.streamEnd();
 }
 
 function appendJarvisEnd(fullText) {
@@ -302,8 +346,10 @@ function appendJarvisEnd(fullText) {
   if (text) pushAiLog(`AI: ${truncate(text, 50)}`);
   if (text && window.voice) {
     setState('speaking', 'falando');
-    window.voice.speak(text);
+    ttsFlush(text);
   } else {
+    ttsBuf = '';
+    ttsSent = false;
     setState('idle', 'pronto');
   }
 }

@@ -21,6 +21,8 @@ class Voice {
         // TTS backend (Coqui XTTS-v2 local)
         this._currentAudio = null;     // <audio> element atualmente tocando
         this._backendTTSDisabled = false; // se já falhou uma vez, desliga até próxima sessão
+        this._stream = null;              // fila de frases da resposta em andamento
+        this._streamFallbackText = '';
 
         // Botão TTS (Ctrl+T) — quando true, JARVIS não fala, só mostra no chat.
         // Persiste em localStorage.
@@ -301,6 +303,161 @@ class Voice {
         });
     }
 
+    // ─── Fala em streaming: frase a frase, enquanto o LLM ainda escreve ───
+    // app.js chama streamPush(frase) a cada frase completa e streamEnd() no
+    // fim da resposta. Cada frase é sintetizada e tocada em ordem, então o
+    // JARVIS começa a falar ~1-2 s depois da primeira frase, em vez de
+    // esperar a resposta inteira + a síntese inteira.
+
+    streamPush(text) {
+        text = (text || '').trim();
+        // Sem letra nem número (só emoji/pontuação) não há o que falar.
+        if (!text || this.muted || !/[\p{L}\p{N}]/u.test(text)) return;
+
+        // Backend já falhou nesta sessão: junta tudo e fala no streamEnd().
+        if (this._backendTTSDisabled) {
+            this._streamFallbackText = (this._streamFallbackText || '') + ' ' + text;
+            return;
+        }
+
+        let s = this._stream;
+        if (!s || s.ended) {
+            // Resposta nova: corta qualquer fala anterior e abre a fila.
+            this._forceResetSpeech();
+            s = this._stream = {
+                texts: [], blobs: [], ended: false, dead: false,
+                fetching: false, playing: false, failedRest: null,
+                ctrl: new AbortController(),
+            };
+            this.speaking = true;
+            if (this.onSpeakStart) this.onSpeakStart();
+            this.suspend();
+        }
+        s.texts.push(text);
+        this._streamFetchLoop(s);
+    }
+
+    streamEnd() {
+        if (this.muted) {
+            if (this.onSpeakStart) this.onSpeakStart();
+            setTimeout(() => { if (this.onSpeakEnd) this.onSpeakEnd(); }, 30);
+            return;
+        }
+        if (this._streamFallbackText) {
+            const rest = this._streamFallbackText;
+            this._streamFallbackText = '';
+            this.speak(rest);
+            return;
+        }
+        const s = this._stream;
+        if (!s) {
+            // Nada falável chegou (ex.: resposta só com emoji): libera a UI.
+            setTimeout(() => { if (this.onSpeakEnd) this.onSpeakEnd(); }, 30);
+            return;
+        }
+        s.ended = true;
+        this._streamPlayNext(s);
+    }
+
+    /** Sintetiza as frases da fila, uma por vez e em ordem. */
+    async _streamFetchLoop(s) {
+        if (s.fetching) return;   // o loop já em andamento pega as novas
+        s.fetching = true;
+        while (!s.dead && s.texts.length) {
+            const text = s.texts.shift();
+            try {
+                const blob = await this._fetchTTS(text, s.ctrl.signal);
+                if (s.dead) return;
+                s.blobs.push(blob);
+                this._streamPlayNext(s);
+            } catch (err) {
+                if (s.dead) return;
+                console.warn('[voice] backend TTS falhou — fallback Web Speech:', err);
+                this._backendTTSDisabled = true;
+                s.failedRest = [text, ...s.texts].join(' ');
+                s.texts = [];
+                break;
+            }
+        }
+        s.fetching = false;
+        this._streamPlayNext(s);
+    }
+
+    _streamPlayNext(s) {
+        if (s.dead || s.playing) return;
+        if (s.blobs.length) {
+            s.playing = true;
+            const next = () => { s.playing = false; this._streamPlayNext(s); };
+            this._playBlob(s.blobs.shift()).then(next, next);
+            return;
+        }
+        if (s.fetching) return;   // próxima frase ainda sendo sintetizada
+        if (s.failedRest !== null) {
+            // Backend caiu no meio: o resto vai pela voz do navegador.
+            const rest = s.failedRest;
+            s.dead = true;
+            this._stream = null;
+            if (window.speechSynthesis && rest) setTimeout(() => this._doSpeak(rest), 80);
+            else this._forceResetSpeech();
+            return;
+        }
+        if (s.ended && !s.texts.length) {
+            s.dead = true;
+            this._stream = null;
+            this.speaking = false;
+            this._stopFakeAudio();
+            if (this.onSpeakEnd) this.onSpeakEnd();
+            this.resume();
+        }
+    }
+
+    async _fetchTTS(text, signal) {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 60000);
+        if (signal) signal.addEventListener('abort', () => ctrl.abort(), { once: true });
+        try {
+            const resp = await fetch('/api/tts', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text, language: 'pt' }),
+                signal: ctrl.signal,
+            });
+            if (!resp.ok) {
+                let detail = '';
+                try { detail = (await resp.json()).error || ''; } catch (_) {}
+                throw new Error(`HTTP ${resp.status}${detail ? ' — ' + detail : ''}`);
+            }
+            const blob = await resp.blob();
+            if (!blob || blob.size < 100) throw new Error('WAV vazio');
+            return blob;
+        } finally {
+            clearTimeout(timer);
+        }
+    }
+
+    /** Toca um WAV e resolve quando terminar (ou der erro / for interrompido). */
+    _playBlob(blob) {
+        return new Promise((resolve) => {
+            const url = URL.createObjectURL(blob);
+            const audio = new Audio(url);
+            audio.preload = 'auto';
+            this._currentAudio = audio;
+            this._fakeAudio();
+            let finished = false;
+            const finish = () => {
+                if (finished) return;
+                finished = true;
+                if (this._currentAudio === audio) this._currentAudio = null;
+                try { URL.revokeObjectURL(url); } catch (_) {}
+                resolve();
+            };
+            audio.onended = finish;
+            audio.onerror = finish;
+            const p = audio.play();
+            if (p && typeof p.catch === 'function') p.catch(finish);
+        });
+    }
+
     _doSpeak(text) {
         const utt = new SpeechSynthesisUtterance(text);
         if (this.synthVoice) utt.voice = this.synthVoice;
@@ -367,6 +524,13 @@ class Voice {
     }
 
     _forceResetSpeech() {
+        if (this._stream) {
+            // Mata a fila de frases em andamento (fetches + reprodução).
+            this._stream.dead = true;
+            try { this._stream.ctrl.abort(); } catch (_) {}
+            this._stream = null;
+        }
+        this._streamFallbackText = '';
         if (window.speechSynthesis) {
             try { speechSynthesis.cancel(); } catch (_) {}
         }

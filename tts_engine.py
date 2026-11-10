@@ -20,12 +20,14 @@ Modelo:
 """
 from __future__ import annotations
 
+import io
 import logging
 import os
 import re
 import tempfile
 import threading
 import time
+import wave
 from pathlib import Path
 from typing import Optional
 
@@ -61,7 +63,22 @@ def _clean_for_tts(text: str) -> str:
     "ponto" falado em 4/9 falas -> 0/9). Não mexe em decimais ("3.5"),
     só em pontos seguidos de espaço ou fim do texto.
     """
-    return re.sub(r"\.+(\s+|$)", lambda m: "," + m.group(1) if m.group(1) else "", text).strip()
+    # Markdown e emojis que o LLM solta às vezes ("*CPU*", "😊") viram ruído falado.
+    text = re.sub(r"[*_`#]+", "", text)
+    text = re.sub(r"(?m)^\s*[-•]\s+", "", text)   # marcador de lista
+    text = re.sub(r"[🀀-🫿☀-➿️]", "", text)
+    text = re.sub(r"\s*[—–]\s*", ", ", text)
+    return re.sub(r"\.+(\s+|$)", lambda m: "," + m.group(1) if m.group(1) else "", text).strip(" ,")
+
+
+def _silence_wav(seconds: float = 0.05, rate: int = 24000) -> bytes:
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(b"\x00\x00" * int(rate * seconds))
+    return buf.getvalue()
 
 
 def _resolve_sample() -> Optional[Path]:
@@ -93,6 +110,9 @@ class TTSEngine:
         self._sample_path: Optional[Path] = None
         self._speaker: str = DEFAULT_SPEAKER
         self._available_speakers: list[str] = []
+        # Cache do timbre clonado: (caminho, mtime) -> latentes do XTTS.
+        self._latents_key: Optional[tuple] = None
+        self._latents: Optional[tuple] = None
 
     @property
     def available(self) -> bool:
@@ -181,6 +201,68 @@ class TTSEngine:
             self._speaker,
         )
 
+    def _clone_latents(self, sample: Path) -> tuple:
+        """Latentes da voz de referência — calculados 1x e reusados (antes eram
+        recalculados a cada fala, ~0,5 s jogados fora por frase)."""
+        key = (str(sample), sample.stat().st_mtime_ns)
+        if self._latents_key != key:
+            model = self._tts.synthesizer.tts_model  # type: ignore[union-attr]
+            cfg = model.config
+            self._latents = model.get_conditioning_latents(
+                audio_path=[str(sample)],
+                gpt_cond_len=cfg.gpt_cond_len,
+                gpt_cond_chunk_len=cfg.gpt_cond_chunk_len,
+                max_ref_length=cfg.max_ref_len,
+                sound_norm_refs=cfg.sound_norm_refs,
+            )
+            self._latents_key = key
+        return self._latents  # type: ignore[return-value]
+
+    def _synth_clone(self, text: str, language: str, sample: Path) -> bytes:
+        """Clone direto pelo modelo XTTS (latentes em cache, WAV em memória)."""
+        import numpy as np
+
+        model = self._tts.synthesizer.tts_model  # type: ignore[union-attr]
+        cfg = model.config
+        gpt_cond, speaker_emb = self._clone_latents(sample)
+        out = model.inference(
+            text, language, gpt_cond, speaker_emb,
+            temperature=cfg.temperature,
+            length_penalty=cfg.length_penalty,
+            repetition_penalty=cfg.repetition_penalty,
+            top_k=cfg.top_k,
+            top_p=cfg.top_p,
+            enable_text_splitting=True,
+        )
+        wav = np.clip(np.asarray(out["wav"], dtype=np.float32), -1.0, 1.0)
+        # Devolve o cache do PyTorch pra GPU: sem isso o processo cresce de
+        # ~2,4 pra ~2,9 GB e empurra o LLM pra memória compartilhada (lento).
+        if self._device == "cuda":
+            try:
+                import torch
+                torch.cuda.empty_cache()
+            except Exception:  # noqa: BLE001
+                pass
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(int(cfg.audio.output_sample_rate))
+            w.writeframes((wav * 32767.0).astype("<i2").tobytes())
+        return buf.getvalue()
+
+    def warmup(self) -> None:
+        """Carrega o modelo, calcula o timbre e roda uma fala curta descartável,
+        pra primeira fala de verdade não pagar a inicialização da GPU (~3 s)."""
+        sample = _resolve_sample()
+        with self._lock:
+            self._ensure_loaded()
+            if sample:
+                try:
+                    self._synth_clone("Pronto, Senhor", "pt", sample)
+                except Exception:  # noqa: BLE001
+                    log.exception("TTS: warmup falhou (segue sem)")
+
     def synthesize(self, text: str, language: str = "pt") -> bytes:
         """
         Sintetiza `text` em `language` (default pt) e devolve WAV bytes.
@@ -198,6 +280,9 @@ class TTSEngine:
         if len(text) > 800:
             text = text[:797] + "..."
         text = _clean_for_tts(text)
+        if not re.search(r"\w", text):
+            # Só emoji/pontuação (ex.: "😊" no fim da resposta): nada a falar.
+            return _silence_wav()
 
         sample = _resolve_sample()
         # Não tem nem sample nem speaker built-in => sem o que cantar.
@@ -212,6 +297,18 @@ class TTSEngine:
             self._ensure_loaded()
 
             t0 = time.time()
+            if sample:
+                try:
+                    data = self._synth_clone(text, language, sample)
+                    log.info(
+                        "TTS[clone]: %d chars → %d KB em %.2fs",
+                        len(text), len(data) // 1024, time.time() - t0,
+                    )
+                    return data
+                except Exception:  # noqa: BLE001
+                    # API interna mudou? Cai pro caminho público (mais lento).
+                    log.exception("TTS: clone direto falhou — usando tts_to_file")
+
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
                 out_path = Path(tmp.name)
             try:

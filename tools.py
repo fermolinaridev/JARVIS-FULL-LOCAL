@@ -6,6 +6,7 @@ import os
 import platform
 import shutil
 import subprocess
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -20,20 +21,60 @@ DANGEROUS_KEYWORDS = (
 )
 
 
+# Memória e notas são injetadas pelo main.py via bind(). Antes as tools faziam
+# `from main import MEMORY`: como o programa roda como __main__, isso executava
+# o main.py de novo como um 2º módulo (~1 s na 1ª chamada) e criava uma SEGUNDA
+# Memory — fatos salvos por `remember` não chegavam ao Brain até reiniciar.
+_MEMORY: Any = None
+_NOTES: Any = None
+
+
+def bind(memory: Any, notes: Any) -> None:
+    global _MEMORY, _NOTES
+    _MEMORY, _NOTES = memory, notes
+
+
 def _memory():
-    from main import MEMORY  # type: ignore[attr-defined]
-    return MEMORY
+    if _MEMORY is None:
+        raise RuntimeError("tools.bind() não foi chamado")
+    return _MEMORY
 
 
 def _notes():
-    from main import NOTES  # type: ignore[attr-defined]
-    return NOTES
+    if _NOTES is None:
+        raise RuntimeError("tools.bind() não foi chamado")
+    return _NOTES
+
+
+# Uso de CPU sem bloquear: média desde a amostra anterior, calculada aqui com
+# psutil.cpu_times(). (psutil.cpu_percent(interval=None) guarda o estado POR
+# THREAD e o servidor atende cada request numa thread nova — devolvia sempre 0.)
+# Antes cada chamada dormia 0,4 s (interval=0.4). O HUD consulta a cada 2,5 s,
+# então o valor está sempre fresco; amostras a menos de 0,5 s reusam a anterior.
+_CPU_LOCK = threading.Lock()
+_CPU: dict[str, float] = {"t": 0.0, "busy": 0.0, "total": 0.0, "value": 0.0}
+
+
+def _cpu_percent() -> float:
+    with _CPU_LOCK:
+        now = time.monotonic()
+        if now - _CPU["t"] >= 0.5:
+            times = psutil.cpu_times()
+            total = float(sum(times))
+            busy = total - float(times.idle)
+            if _CPU["total"] and total > _CPU["total"]:
+                _CPU["value"] = round(100.0 * (busy - _CPU["busy"]) / (total - _CPU["total"]), 1)
+            _CPU.update(t=now, busy=busy, total=total)
+        return _CPU["value"]
+
+
+_cpu_percent()  # primeira amostra só inicia a contagem
 
 
 # --- Sistema -----------------------------------------------------------------
 
 def get_system_status() -> dict[str, Any]:
-    cpu_percent = psutil.cpu_percent(interval=0.4)
+    cpu_percent = _cpu_percent()
     mem = psutil.virtual_memory()
     disk = psutil.disk_usage("/")
     boot_time = datetime.fromtimestamp(psutil.boot_time())
@@ -57,9 +98,15 @@ def list_processes(top_n: int = 10) -> list[dict[str, Any]]:
     procs: list[dict[str, Any]] = []
     for p in psutil.process_iter(["pid", "name", "cpu_percent", "memory_percent"]):
         try:
-            procs.append(p.info)
+            info = p.info
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
+        if not info.get("pid"):
+            continue  # "System Idle Process" não é um processo de verdade
+        # 2 casas bastam; os floats crus (4.818294872900608e-05) só gastam tokens
+        info["cpu_percent"] = round(info.get("cpu_percent") or 0.0, 1)
+        info["memory_percent"] = round(info.get("memory_percent") or 0.0, 2)
+        procs.append(info)
     procs.sort(key=lambda x: x.get("cpu_percent") or 0, reverse=True)
     return procs[:max(1, min(top_n, 50))]
 

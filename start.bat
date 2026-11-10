@@ -8,6 +8,7 @@ cd /d "%~dp0"
 REM Se houver venv local, usa ele
 set "PY=python"
 if exist ".venv\Scripts\python.exe" set "PY=.venv\Scripts\python.exe"
+if exist "venv\Scripts\python.exe" set "PY=venv\Scripts\python.exe"
 
 REM Roda minimizado, redirecionando logs
 start "JARVIS" /MIN cmd /c "%PY% main.py >> jarvis.log 2>&1"
